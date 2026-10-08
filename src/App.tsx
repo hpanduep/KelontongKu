@@ -1,70 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import React, { useState } from 'react';
+import type { Product, CartItem, Transaction, KasbonItem, Settings } from './types';
+import { productsTable, transactionsTable, kasbonTable, type CloudData } from './lib/db';
+import { useCloudCollection, useCloudSettings } from './lib/sync';
 
-interface Product {
-  id: string;
-  name: string;
-  price: number;
-  stock: number;
-  category: 'kelontong' | 'warung';
-  barcode?: string;
-  image?: string;
-}
 
-interface CartItem extends Product {
-  qty: number;
-  customPrice?: number;
-}
-
-interface Transaction {
-  id: string;
-  date: string;
-  formattedDate: string;
-  items: CartItem[];
-  subtotal: number;
-  discount: number;
-  finalPayment: number;
-  cashGiven: number;
-  change: number;
-  isKasbon: boolean;
-  customerName?: string;
-  profile: 'kelontong' | 'warung';
-}
-
-interface KasbonItem {
-  id: string;
-  trxId: string;
-  customerName: string;
-  date: string;
-  amount: number;
-  isPaid: boolean;
-  itemsSummary: string;
-}
-
-interface Settings {
-  storeName: string;
-  tokoPrefix: string;
-  warungPrefix: string;
-  printerWidth: string;
-}
-
-export default function App() {
+export default function App({ initial, userId }: { initial: CloudData; userId: string }) {
   const [activeProfile, setActiveProfile] = useState<'kelontong' | 'warung'>('kelontong');
   const [activeMenu, setActiveMenu] = useState<'kasir' | 'produk' | 'kasbon' | 'laporan' | 'pengaturan'>('kasir');
 
-  // Load Pengaturan dari Supabase & localStorage
-  const [settings, setSettings] = useState<Settings>(() => {
-    const saved = localStorage.getItem('kelontong_settings');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return {
-      storeName: '',
-      tokoPrefix: 'TOKO',
-      warungPrefix: 'WARUNG',
-      printerWidth: '58mm'
-    };
-  });
+  // Pengaturan toko (dimuat dari Supabase)
+  const [settings, setSettings] = useState<Settings>(initial.settings);
 
   // State Form Pengaturan Sementara
   const [formStoreName, setFormStoreName] = useState(settings.storeName);
@@ -72,41 +17,8 @@ export default function App() {
   const [formWarungPrefix, setFormWarungPrefix] = useState(settings.warungPrefix);
   const [formPrinterWidth, setFormPrinterWidth] = useState(settings.printerWidth);
 
-  // Ambil data profil dari Supabase saat awal buka aplikasi
-  useEffect(() => {
-    async function fetchProfile() {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .limit(1)
-        .single();
-
-      if (data && !error) {
-        const loadedName = data.nama_toko || '';
-        setSettings(prev => ({ ...prev, storeName: loadedName }));
-        setFormStoreName(loadedName);
-      }
-    }
-    fetchProfile();
-  }, []);
-
-  // Load awal produk dari localStorage
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('kelontong_products');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return [
-      { id: '1', name: 'Beras Ramos 5kg', price: 65000, stock: 15, category: 'kelontong', barcode: '899123456701' },
-      { id: '2', name: 'Minyak Goreng Bimoli 1L', price: 19000, stock: 30, category: 'kelontong', barcode: '899123456702' },
-      { id: '3', name: 'Gula Pasir 1kg', price: 17500, stock: 25, category: 'kelontong', barcode: '899123456703' },
-      { id: '4', name: 'Sabun Mandi Lifebuoy', price: 4500, stock: 40, category: 'kelontong', barcode: '899123456704' },
-      { id: '5', name: 'Es Teh Manis Jumbo', price: 5000, stock: 100, category: 'warung' },
-      { id: '6', name: 'Kopi Hitam Tubruk', price: 4000, stock: 80, category: 'warung' },
-      { id: '7', name: 'Indomie Telor Rebus', price: 12000, stock: 45, category: 'warung' },
-      { id: '8', name: 'Gorengan Bakwan/Tempe', price: 2000, stock: 60, category: 'warung' },
-    ];
-  });
+  // Produk (dimuat dari Supabase)
+  const [products, setProducts] = useState<Product[]>(initial.products);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,22 +29,9 @@ export default function App() {
   const [cashInput, setCashInput] = useState<string>('');
   const [customerNameInput, setCustomerNameInput] = useState<string>('');
 
-  // Load Transactions & Kasbon dari localStorage
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('kelontong_transactions');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return [];
-  });
-
-  const [kasbonList, setKasbonList] = useState<KasbonItem[]>(() => {
-    const saved = localStorage.getItem('kelontong_kasbon');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return [];
-  });
+  // Transaksi & kasbon (dimuat dari Supabase)
+  const [transactions, setTransactions] = useState<Transaction[]>(initial.transactions);
+  const [kasbonList, setKasbonList] = useState<KasbonItem[]>(initial.kasbon);
 
   const [activeReceipt, setActiveReceipt] = useState<Transaction | null>(null);
 
@@ -147,22 +46,11 @@ export default function App() {
   const [formCategory, setFormCategory] = useState<'kelontong' | 'warung'>('kelontong');
   const [formImage, setFormImage] = useState('');
 
-  // Simpan otomatis ke localStorage
-  useEffect(() => {
-    localStorage.setItem('kelontong_products', JSON.stringify(products));
-  }, [products]);
-
-  useEffect(() => {
-    localStorage.setItem('kelontong_transactions', JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem('kelontong_kasbon', JSON.stringify(kasbonList));
-  }, [kasbonList]);
-
-  useEffect(() => {
-    localStorage.setItem('kelontong_settings', JSON.stringify(settings));
-  }, [settings]);
+  // Simpan otomatis ke Supabase (tambah / ubah / hapus terdeteksi otomatis)
+  useCloudCollection(productsTable, userId, products, initial.products);
+  useCloudCollection(transactionsTable, userId, transactions, initial.transactions);
+  useCloudCollection(kasbonTable, userId, kasbonList, initial.kasbon);
+  useCloudSettings(userId, settings, initial.settings);
 
   // Logika Kata Sapaan Otomatis Berdasarkan Jam
   const getGreeting = () => {
@@ -379,26 +267,15 @@ export default function App() {
     }
   };
 
-  // Simpan pengaturan ke Supabase tabel profiles
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({ id: 1, nama_toko: formStoreName });
-
-    if (error) {
-      console.error('Gagal simpan ke Supabase:', error);
-      alert('Gagal menyimpan pengaturan ke database Supabase!');
-    } else {
-      setSettings({
-        storeName: formStoreName,
-        tokoPrefix: formTokoPrefix,
-        warungPrefix: formWarungPrefix,
-        printerWidth: formPrinterWidth
-      });
-      alert('Pengaturan berhasil disimpan ke Supabase!');
-    }
+    setSettings({
+      storeName: formStoreName,
+      tokoPrefix: formTokoPrefix,
+      warungPrefix: formWarungPrefix,
+      printerWidth: formPrinterWidth
+    });
+    alert('Pengaturan berhasil disimpan!');
   };
 
   return (
@@ -470,7 +347,7 @@ export default function App() {
           </nav>
 
           <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100">
-            KelontongKu v1.0.45 • Supabase Connected
+            KelontongKu v1.0.45 • Stable Build
           </div>
         </aside>
 
@@ -780,7 +657,7 @@ export default function App() {
 
               <form onSubmit={handleSaveSettings} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-[#0B2545] mb-1">Nama Usaha / Toko (Tersambung ke Supabase)</label>
+                  <label className="block text-sm font-semibold text-[#0B2545] mb-1">Nama Usaha / Toko</label>
                   <input 
                     type="text" 
                     value={formStoreName}
@@ -788,7 +665,7 @@ export default function App() {
                     placeholder="Contoh: AL-BARKAH" 
                     className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#3A7CA5]"
                   />
-                  <p className="text-[11px] text-gray-400 mt-1">Nama ini akan otomatis tersimpan ke tabel Supabase dan tampil di sapaan header atas.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Nama ini akan otomatis tampil di sapaan header atas dan struk belanja.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -802,7 +679,6 @@ export default function App() {
                       <option value="TOKO">TOKO</option>
                       <option value="WARUNG">WARUNG</option>
                       <option value="GROSIR">GROSIR</option>
-                      <option value="KELONTONG">KELONTONG</option>
                     </select>
                   </div>
 
@@ -838,7 +714,7 @@ export default function App() {
                     type="submit"
                     className="w-full py-3 bg-[#0B2545] text-white rounded-xl font-bold text-sm hover:bg-[#133863] transition shadow"
                   >
-                    Simpan Pengaturan ke Supabase
+                    Simpan Pengaturan
                   </button>
                 </div>
               </form>
@@ -927,7 +803,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal / Pop-up Struk Belanja */}
+      {/* Modal / Pop-up Struk Belanja (Header Menyesuaikan Sektor & Nama Usaha) */}
       {activeReceipt && (() => {
         const primaryProfile = activeReceipt.profile;
         const storeCleanName = settings.storeName.trim() || 'AL-BARKAH';
