@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 
 interface Product {
   id: string;
@@ -51,7 +52,7 @@ export default function App() {
   const [activeProfile, setActiveProfile] = useState<'kelontong' | 'warung'>('kelontong');
   const [activeMenu, setActiveMenu] = useState<'kasir' | 'produk' | 'kasbon' | 'laporan' | 'pengaturan'>('kasir');
 
-  // Load Pengaturan dari localStorage (Default nama kosong)
+  // Load Pengaturan dari Supabase & localStorage
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('kelontong_settings');
     if (saved) {
@@ -60,7 +61,7 @@ export default function App() {
     return {
       storeName: '',
       tokoPrefix: 'TOKO',
-      warungPrefix: 'DAPOER',
+      warungPrefix: 'WARUNG',
       printerWidth: '58mm'
     };
   });
@@ -70,6 +71,24 @@ export default function App() {
   const [formTokoPrefix, setFormTokoPrefix] = useState(settings.tokoPrefix);
   const [formWarungPrefix, setFormWarungPrefix] = useState(settings.warungPrefix);
   const [formPrinterWidth, setFormPrinterWidth] = useState(settings.printerWidth);
+
+  // Ambil data profil dari Supabase saat awal buka aplikasi
+  useEffect(() => {
+    async function fetchProfile() {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .limit(1)
+        .single();
+
+      if (data && !error) {
+        const loadedName = data.nama_toko || '';
+        setSettings(prev => ({ ...prev, storeName: loadedName }));
+        setFormStoreName(loadedName);
+      }
+    }
+    fetchProfile();
+  }, []);
 
   // Load awal produk dari localStorage
   const [products, setProducts] = useState<Product[]>(() => {
@@ -360,15 +379,26 @@ export default function App() {
     }
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  // Simpan pengaturan ke Supabase tabel profiles
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSettings({
-      storeName: formStoreName,
-      tokoPrefix: formTokoPrefix,
-      warungPrefix: formWarungPrefix,
-      printerWidth: formPrinterWidth
-    });
-    alert('Pengaturan berhasil disimpan!');
+    
+    const { error } = await supabase
+      .from('profiles')
+      .upsert({ id: 1, nama_toko: formStoreName });
+
+    if (error) {
+      console.error('Gagal simpan ke Supabase:', error);
+      alert('Gagal menyimpan pengaturan ke database Supabase!');
+    } else {
+      setSettings({
+        storeName: formStoreName,
+        tokoPrefix: formTokoPrefix,
+        warungPrefix: formWarungPrefix,
+        printerWidth: formPrinterWidth
+      });
+      alert('Pengaturan berhasil disimpan ke Supabase!');
+    }
   };
 
   return (
@@ -440,7 +470,7 @@ export default function App() {
           </nav>
 
           <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100">
-            KelontongKu v1.0.45 • Stable Build
+            KelontongKu v1.0.45 • Supabase Connected
           </div>
         </aside>
 
@@ -750,7 +780,7 @@ export default function App() {
 
               <form onSubmit={handleSaveSettings} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-[#0B2545] mb-1">Nama Usaha / Toko</label>
+                  <label className="block text-sm font-semibold text-[#0B2545] mb-1">Nama Usaha / Toko (Tersambung ke Supabase)</label>
                   <input 
                     type="text" 
                     value={formStoreName}
@@ -758,7 +788,7 @@ export default function App() {
                     placeholder="Contoh: AL-BARKAH" 
                     className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#3A7CA5]"
                   />
-                  <p className="text-[11px] text-gray-400 mt-1">Nama ini akan otomatis tampil di sapaan header atas dan struk belanja.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Nama ini akan otomatis tersimpan ke tabel Supabase dan tampil di sapaan header atas.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -772,6 +802,7 @@ export default function App() {
                       <option value="TOKO">TOKO</option>
                       <option value="WARUNG">WARUNG</option>
                       <option value="GROSIR">GROSIR</option>
+                      <option value="KELONTONG">KELONTONG</option>
                     </select>
                   </div>
 
@@ -807,7 +838,7 @@ export default function App() {
                     type="submit"
                     className="w-full py-3 bg-[#0B2545] text-white rounded-xl font-bold text-sm hover:bg-[#133863] transition shadow"
                   >
-                    Simpan Pengaturan
+                    Simpan Pengaturan ke Supabase
                   </button>
                 </div>
               </form>
@@ -896,7 +927,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal / Pop-up Struk Belanja (Header Menyesuaikan Sektor & Nama Usaha) */}
+      {/* Modal / Pop-up Struk Belanja */}
       {activeReceipt && (() => {
         const primaryProfile = activeReceipt.profile;
         const storeCleanName = settings.storeName.trim() || 'AL-BARKAH';
